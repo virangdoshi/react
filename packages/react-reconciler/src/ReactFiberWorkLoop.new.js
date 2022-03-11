@@ -15,6 +15,11 @@ import type {StackCursor} from './ReactFiberStack.new';
 import type {Flags} from './ReactFiberFlags';
 import type {FunctionComponentUpdateQueue} from './ReactFiberHooks.new';
 import type {EventPriority} from './ReactEventPriorities.new';
+import type {
+  PendingTransitionCallbacks,
+  TransitionObject,
+  Transitions,
+} from './ReactFiberTracingMarkerComponent.new';
 
 import {
   warnAboutDeprecatedLifecycles,
@@ -32,8 +37,8 @@ import {
   enableStrictEffects,
   skipUnmountedBoundaries,
   enableUpdaterTracking,
-  warnOnSubscriptionInsideStartTransition,
   enableCache,
+  enableTransitionTracing,
 } from 'shared/ReactFeatureFlags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import is from 'shared/objectIs';
@@ -140,6 +145,8 @@ import {
   getHighestPriorityLane,
   addFiberToLanesMap,
   movePendingFibersToMemoized,
+  addTransitionToLanesMap,
+  getTransitionsForLanes,
 } from './ReactFiberLane.new';
 import {
   DiscreteEventPriority,
@@ -233,6 +240,7 @@ import {
   isLegacyActEnvironment,
   isConcurrentActEnvironment,
 } from './ReactFiberAct.new';
+import {processTransitionCallbacks} from './ReactFiberTracingMarkerComponent.new';
 
 const ceil = Math.ceil;
 
@@ -245,11 +253,10 @@ const {
 
 type ExecutionContext = number;
 
-export const NoContext = /*             */ 0b0000;
-const BatchedContext = /*               */ 0b0001;
-const RenderContext = /*                */ 0b0010;
-const CommitContext = /*                */ 0b0100;
-export const RetryAfterError = /*       */ 0b1000;
+export const NoContext = /*             */ 0b000;
+const BatchedContext = /*               */ 0b001;
+const RenderContext = /*                */ 0b010;
+const CommitContext = /*                */ 0b100;
 
 type RootExitStatus = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 const RootInProgress = 0;
@@ -315,6 +322,51 @@ let workInProgressRootRenderTargetTime: number = Infinity;
 // How long a render is supposed to take before we start following CPU
 // suspense heuristics and opt out of rendering more content.
 const RENDER_TIMEOUT_MS = 500;
+
+let workInProgressTransitions: Transitions | null = null;
+export function getWorkInProgressTransitions() {
+  return workInProgressTransitions;
+}
+
+let currentPendingTransitionCallbacks: PendingTransitionCallbacks | null = null;
+
+export function addTransitionStartCallbackToPendingTransition(
+  transition: TransitionObject,
+) {
+  if (enableTransitionTracing) {
+    if (currentPendingTransitionCallbacks === null) {
+      currentPendingTransitionCallbacks = {
+        transitionStart: [],
+        transitionComplete: null,
+      };
+    }
+
+    if (currentPendingTransitionCallbacks.transitionStart === null) {
+      currentPendingTransitionCallbacks.transitionStart = [];
+    }
+
+    currentPendingTransitionCallbacks.transitionStart.push(transition);
+  }
+}
+
+export function addTransitionCompleteCallbackToPendingTransition(
+  transition: TransitionObject,
+) {
+  if (enableTransitionTracing) {
+    if (currentPendingTransitionCallbacks === null) {
+      currentPendingTransitionCallbacks = {
+        transitionStart: null,
+        transitionComplete: [],
+      };
+    }
+
+    if (currentPendingTransitionCallbacks.transitionComplete === null) {
+      currentPendingTransitionCallbacks.transitionComplete = [];
+    }
+
+    currentPendingTransitionCallbacks.transitionComplete.push(transition);
+  }
+}
 
 function resetRenderTimer() {
   workInProgressRootRenderTargetTime = now() + RENDER_TIMEOUT_MS;
@@ -399,12 +451,13 @@ export function requestUpdateLane(fiber: Fiber): Lane {
 
   const isTransition = requestCurrentTransition() !== NoTransition;
   if (isTransition) {
-    if (
-      __DEV__ &&
-      warnOnSubscriptionInsideStartTransition &&
-      ReactCurrentBatchConfig._updatedFibers
-    ) {
-      ReactCurrentBatchConfig._updatedFibers.add(fiber);
+    if (__DEV__ && ReactCurrentBatchConfig.transition !== null) {
+      const transition = ReactCurrentBatchConfig.transition;
+      if (!transition._updatedFibers) {
+        transition._updatedFibers = new Set();
+      }
+
+      transition._updatedFibers.add(fiber);
     }
     // The algorithm for assigning an update to a lane should be stable for all
     // updates at the same priority within the same event. To do this, the
@@ -517,8 +570,47 @@ export function scheduleUpdateOnFiber(
       }
     }
 
-    // TODO: Consolidate with `isInterleavedUpdate` check
-    if (root === workInProgressRoot) {
+    if (enableTransitionTracing) {
+      const transition = ReactCurrentBatchConfig.transition;
+      if (transition !== null) {
+        if (transition.startTime === -1) {
+          transition.startTime = now();
+        }
+
+        addTransitionToLanesMap(root, transition, lane);
+      }
+    }
+
+    if (root.isDehydrated && root.tag !== LegacyRoot) {
+      // This root's shell hasn't hydrated yet. Revert to client rendering.
+      if (workInProgressRoot === root) {
+        // If this happened during an interleaved event, interrupt the
+        // in-progress hydration. Theoretically, we could attempt to force a
+        // synchronous hydration before switching to client rendering, but the
+        // most common reason the shell hasn't hydrated yet is because it
+        // suspended. So it's very likely to suspend again anyway. For
+        // simplicity, we'll skip that atttempt and go straight to
+        // client rendering.
+        //
+        // Another way to model this would be to give the initial hydration its
+        // own special lane. However, it may not be worth adding a lane solely
+        // for this purpose, so we'll wait until we find another use case before
+        // adding it.
+        //
+        // TODO: Consider only interrupting hydration if the priority of the
+        // update is higher than default.
+        prepareFreshStack(root, NoLanes);
+      }
+      root.isDehydrated = false;
+      const error = new Error(
+        'This root received an early update, before anything was able ' +
+          'hydrate. Switched the entire root to client rendering.',
+      );
+      const onRecoverableError = root.onRecoverableError;
+      onRecoverableError(error);
+    } else if (root === workInProgressRoot) {
+      // TODO: Consolidate with `isInterleavedUpdate` check
+
       // Received an update to a tree that's in the middle of rendering. Mark
       // that there was an interleaved update work on this root. Unless the
       // `deferRenderPhaseUpdateToNextBatch` flag is off and this is a render
@@ -562,6 +654,26 @@ export function scheduleUpdateOnFiber(
     }
   }
   return root;
+}
+
+export function scheduleInitialHydrationOnRoot(
+  root: FiberRoot,
+  lane: Lane,
+  eventTime: number,
+) {
+  // This is a special fork of scheduleUpdateOnFiber that is only used to
+  // schedule the initial hydration of a root that has just been created. Most
+  // of the stuff in scheduleUpdateOnFiber can be skipped.
+  //
+  // The main reason for this separate path, though, is to distinguish the
+  // initial children from subsequent updates. In fully client-rendered roots
+  // (createRoot instead of hydrateRoot), all top-level renders are modeled as
+  // updates, but hydration roots are special because the initial render must
+  // match what was rendered on the server.
+  const current = root.current;
+  current.lanes = lane;
+  markRootUpdated(root, lane, eventTime);
+  ensureRootIsScheduled(root, eventTime);
 }
 
 // This is split into a separate function so we can mark a fiber with pending
@@ -902,9 +1014,6 @@ function performConcurrentWorkOnRoot(root, didTimeout) {
 }
 
 function recoverFromConcurrentError(root, errorRetryLanes) {
-  const prevExecutionContext = executionContext;
-  executionContext |= RetryAfterError;
-
   // If an error occurred during hydration, discard server response and fall
   // back to client side render.
   if (root.isDehydrated) {
@@ -912,6 +1021,12 @@ function recoverFromConcurrentError(root, errorRetryLanes) {
     if (__DEV__) {
       errorHydratingContainer(root.containerInfo);
     }
+    const error = new Error(
+      'There was an error while hydrating. Because the error happened outside ' +
+        'of a Suspense boundary, the entire root will switch to ' +
+        'client rendering.',
+    );
+    renderDidError(error);
   }
 
   const errorsFromFirstAttempt = workInProgressRootConcurrentErrors;
@@ -927,9 +1042,6 @@ function recoverFromConcurrentError(root, errorRetryLanes) {
   } else {
     // The UI failed to recover.
   }
-
-  executionContext = prevExecutionContext;
-
   return exitStatus;
 }
 
@@ -1198,8 +1310,9 @@ export function getExecutionContext(): ExecutionContext {
 export function deferredUpdates<A>(fn: () => A): A {
   const previousPriority = getCurrentUpdatePriority();
   const prevTransition = ReactCurrentBatchConfig.transition;
+
   try {
-    ReactCurrentBatchConfig.transition = 0;
+    ReactCurrentBatchConfig.transition = null;
     setCurrentUpdatePriority(DefaultEventPriority);
     return fn();
   } finally {
@@ -1238,7 +1351,7 @@ export function discreteUpdates<A, B, C, D, R>(
   const previousPriority = getCurrentUpdatePriority();
   const prevTransition = ReactCurrentBatchConfig.transition;
   try {
-    ReactCurrentBatchConfig.transition = 0;
+    ReactCurrentBatchConfig.transition = null;
     setCurrentUpdatePriority(DiscreteEventPriority);
     return fn(a, b, c, d);
   } finally {
@@ -1272,8 +1385,9 @@ export function flushSync(fn) {
 
   const prevTransition = ReactCurrentBatchConfig.transition;
   const previousPriority = getCurrentUpdatePriority();
+
   try {
-    ReactCurrentBatchConfig.transition = 0;
+    ReactCurrentBatchConfig.transition = null;
     setCurrentUpdatePriority(DiscreteEventPriority);
     if (fn) {
       return fn();
@@ -1283,6 +1397,7 @@ export function flushSync(fn) {
   } finally {
     setCurrentUpdatePriority(previousPriority);
     ReactCurrentBatchConfig.transition = prevTransition;
+
     executionContext = prevExecutionContext;
     // Flush the immediate callbacks that were scheduled during this batch.
     // Note that this will happen even if batchedUpdates is higher up
@@ -1308,7 +1423,7 @@ export function flushControlled(fn: () => mixed): void {
   const prevTransition = ReactCurrentBatchConfig.transition;
   const previousPriority = getCurrentUpdatePriority();
   try {
-    ReactCurrentBatchConfig.transition = 0;
+    ReactCurrentBatchConfig.transition = null;
     setCurrentUpdatePriority(DiscreteEventPriority);
     fn();
   } finally {
@@ -1354,7 +1469,12 @@ function prepareFreshStack(root: FiberRoot, lanes: Lanes) {
   if (workInProgress !== null) {
     let interruptedWork = workInProgress.return;
     while (interruptedWork !== null) {
-      unwindInterruptedWork(interruptedWork, workInProgressRootRenderLanes);
+      const current = interruptedWork.alternate;
+      unwindInterruptedWork(
+        current,
+        interruptedWork,
+        workInProgressRootRenderLanes,
+      );
       interruptedWork = interruptedWork.return;
     }
   }
@@ -1566,6 +1686,7 @@ function renderRootSync(root: FiberRoot, lanes: Lanes) {
       }
     }
 
+    workInProgressTransitions = getTransitionsForLanes(root, lanes);
     prepareFreshStack(root, lanes);
   }
 
@@ -1650,6 +1771,7 @@ function renderRootConcurrent(root: FiberRoot, lanes: Lanes) {
       }
     }
 
+    workInProgressTransitions = getTransitionsForLanes(root, lanes);
     resetRenderTimer();
     prepareFreshStack(root, lanes);
   }
@@ -1778,7 +1900,7 @@ function completeUnitOfWork(unitOfWork: Fiber): void {
       // This fiber did not complete because something threw. Pop values off
       // the stack without entering the complete phase. If this is a boundary,
       // capture values if possible.
-      const next = unwindWork(completedWork, subtreeRenderLanes);
+      const next = unwindWork(current, completedWork, subtreeRenderLanes);
 
       // Because this fiber did not complete, don't reset its lanes.
 
@@ -1845,8 +1967,9 @@ function commitRoot(root: FiberRoot, recoverableErrors: null | Array<mixed>) {
   // layout phases. Should be able to remove.
   const previousUpdateLanePriority = getCurrentUpdatePriority();
   const prevTransition = ReactCurrentBatchConfig.transition;
+
   try {
-    ReactCurrentBatchConfig.transition = 0;
+    ReactCurrentBatchConfig.transition = null;
     setCurrentUpdatePriority(DiscreteEventPriority);
     commitRootImpl(root, recoverableErrors, previousUpdateLanePriority);
   } finally {
@@ -1981,7 +2104,7 @@ function commitRootImpl(
 
   if (subtreeHasEffects || rootHasEffect) {
     const prevTransition = ReactCurrentBatchConfig.transition;
-    ReactCurrentBatchConfig.transition = 0;
+    ReactCurrentBatchConfig.transition = null;
     const previousPriority = getCurrentUpdatePriority();
     setCurrentUpdatePriority(DiscreteEventPriority);
 
@@ -2186,6 +2309,27 @@ function commitRootImpl(
   // If layout work was scheduled, flush it now.
   flushSyncCallbacks();
 
+  if (enableTransitionTracing) {
+    const prevPendingTransitionCallbacks = currentPendingTransitionCallbacks;
+    const prevRootTransitionCallbacks = root.transitionCallbacks;
+    if (
+      prevPendingTransitionCallbacks !== null &&
+      prevRootTransitionCallbacks !== null
+    ) {
+      // TODO(luna) Refactor this code into the Host Config
+      const endTime = now();
+      currentPendingTransitionCallbacks = null;
+
+      scheduleCallback(IdleSchedulerPriority, () =>
+        processTransitionCallbacks(
+          prevPendingTransitionCallbacks,
+          endTime,
+          prevRootTransitionCallbacks,
+        ),
+      );
+    }
+  }
+
   if (__DEV__) {
     if (enableDebugTracing) {
       logCommitStopped();
@@ -2235,8 +2379,9 @@ export function flushPassiveEffects(): boolean {
     const priority = lowerEventPriority(DefaultEventPriority, renderPriority);
     const prevTransition = ReactCurrentBatchConfig.transition;
     const previousPriority = getCurrentUpdatePriority();
+
     try {
-      ReactCurrentBatchConfig.transition = 0;
+      ReactCurrentBatchConfig.transition = null;
       setCurrentUpdatePriority(priority);
       return flushPassiveEffectsImpl();
     } finally {
@@ -2774,7 +2919,7 @@ if (__DEV__ && replayFailedUnitOfWorkWithInvokeGuardedCallback) {
       // same fiber again.
 
       // Unwind the failed stack frame
-      unwindInterruptedWork(unitOfWork, workInProgressRootRenderLanes);
+      unwindInterruptedWork(current, unitOfWork, workInProgressRootRenderLanes);
 
       // Restore the original properties of the fiber.
       assignFiberPropertiesInDEV(unitOfWork, originalWorkInProgressCopy);

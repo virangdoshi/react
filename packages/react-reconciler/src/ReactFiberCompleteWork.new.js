@@ -28,10 +28,11 @@ import type {
 } from './ReactFiberSuspenseComponent.new';
 import type {SuspenseContext} from './ReactFiberSuspenseContext.new';
 import type {OffscreenState} from './ReactFiberOffscreenComponent';
-import type {Cache, SpawnedCachePool} from './ReactFiberCacheComponent.new';
+import type {Cache} from './ReactFiberCacheComponent.new';
 import {
   enableClientRenderFallbackOnHydrationMismatch,
   enableSuspenseAvoidThisFallback,
+  enableLegacyHidden,
 } from 'shared/ReactFeatureFlags';
 
 import {resetWorkInProgressVersions as resetMutableSourceWorkInProgressVersions} from './ReactMutableSource.new';
@@ -62,6 +63,7 @@ import {
   OffscreenComponent,
   LegacyHiddenComponent,
   CacheComponent,
+  TracingMarkerComponent,
 } from './ReactWorkTags';
 import {NoMode, ConcurrentMode, ProfileMode} from './ReactTypeOfMode';
 import {
@@ -141,6 +143,7 @@ import {
   enableCache,
   enableSuspenseLayoutEffectSemantics,
   enablePersistentOffscreenHostContainer,
+  enableTransitionTracing,
 } from 'shared/ReactFeatureFlags';
 import {
   renderDidSuspend,
@@ -160,12 +163,9 @@ import {
 import {resetChildFibers} from './ReactChildFiber.new';
 import {createScopeInstance} from './ReactFiberScope.new';
 import {transferActualDuration} from './ReactProfilerTimer.new';
-import {
-  popCacheProvider,
-  popRootCachePool,
-  popCachePool,
-} from './ReactFiberCacheComponent.new';
+import {popCacheProvider} from './ReactFiberCacheComponent.new';
 import {popTreeContext} from './ReactFiberTreeContext.new';
+import {popRootTransition, popTransition} from './ReactFiberTransition.new';
 
 function markUpdate(workInProgress: Fiber) {
   // Tag the fiber with an update effect. This turns a Placement into
@@ -862,11 +862,11 @@ function completeWork(
     case HostRoot: {
       const fiberRoot = (workInProgress.stateNode: FiberRoot);
       if (enableCache) {
-        popRootCachePool(fiberRoot, renderLanes);
+        popRootTransition(fiberRoot, renderLanes);
 
         let previousCache: Cache | null = null;
-        if (workInProgress.alternate !== null) {
-          previousCache = workInProgress.alternate.memoizedState.cache;
+        if (current !== null) {
+          previousCache = current.memoizedState.cache;
         }
         const cache: Cache = workInProgress.memoizedState.cache;
         if (cache !== previousCache) {
@@ -1500,9 +1500,8 @@ function completeWork(
         const prevIsHidden = prevState !== null;
         if (
           prevIsHidden !== nextIsHidden &&
-          newProps.mode !== 'unstable-defer-without-hiding' &&
           // LegacyHidden doesn't do any hiding — it only pre-renders.
-          workInProgress.tag !== LegacyHiddenComponent
+          (!enableLegacyHidden || workInProgress.tag !== LegacyHiddenComponent)
         ) {
           workInProgress.flags |= Visibility;
         }
@@ -1520,9 +1519,9 @@ function completeWork(
             // If so, we need to hide those nodes in the commit phase, so
             // schedule a visibility effect.
             if (
-              workInProgress.tag !== LegacyHiddenComponent &&
-              workInProgress.subtreeFlags & (Placement | Update) &&
-              newProps.mode !== 'unstable-defer-without-hiding'
+              (!enableLegacyHidden ||
+                workInProgress.tag !== LegacyHiddenComponent) &&
+              workInProgress.subtreeFlags & (Placement | Update)
             ) {
               workInProgress.flags |= Visibility;
             }
@@ -1533,11 +1532,11 @@ function completeWork(
       if (enableCache) {
         let previousCache: Cache | null = null;
         if (
-          workInProgress.alternate !== null &&
-          workInProgress.alternate.memoizedState !== null &&
-          workInProgress.alternate.memoizedState.cachePool !== null
+          current !== null &&
+          current.memoizedState !== null &&
+          current.memoizedState.cachePool !== null
         ) {
-          previousCache = workInProgress.alternate.memoizedState.cachePool.pool;
+          previousCache = current.memoizedState.cachePool.pool;
         }
         let cache: Cache | null = null;
         if (
@@ -1550,9 +1549,8 @@ function completeWork(
           // Run passive effects to retain/release the cache.
           workInProgress.flags |= Passive;
         }
-        const spawnedCachePool: SpawnedCachePool | null = (workInProgress.updateQueue: any);
-        if (spawnedCachePool !== null) {
-          popCachePool(workInProgress);
+        if (current !== null) {
+          popTransition(workInProgress);
         }
       }
 
@@ -1561,8 +1559,8 @@ function completeWork(
     case CacheComponent: {
       if (enableCache) {
         let previousCache: Cache | null = null;
-        if (workInProgress.alternate !== null) {
-          previousCache = workInProgress.alternate.memoizedState.cache;
+        if (current !== null) {
+          previousCache = current.memoizedState.cache;
         }
         const cache: Cache = workInProgress.memoizedState.cache;
         if (cache !== previousCache) {
@@ -1571,8 +1569,15 @@ function completeWork(
         }
         popCacheProvider(workInProgress, cache);
         bubbleProperties(workInProgress);
-        return null;
       }
+      return null;
+    }
+    case TracingMarkerComponent: {
+      if (enableTransitionTracing) {
+        // Bubble subtree flags before so we can set the flag property
+        bubbleProperties(workInProgress);
+      }
+      return null;
     }
   }
 
