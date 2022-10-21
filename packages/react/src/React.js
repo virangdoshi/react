@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -35,12 +35,14 @@ import {createContext} from './ReactContext';
 import {lazy} from './ReactLazy';
 import {forwardRef} from './ReactForwardRef';
 import {memo} from './ReactMemo';
+import {cache} from './ReactCache';
 import {
   getCacheSignal,
   getCacheForType,
   useCallback,
   useContext,
   useEffect,
+  useEvent,
   useImperativeHandle,
   useDebugValue,
   useInsertionEffect,
@@ -55,6 +57,8 @@ import {
   useDeferredValue,
   useId,
   useCacheRefresh,
+  use,
+  useMemoCache,
 } from './ReactHooks';
 import {
   createElementWithValidation,
@@ -67,10 +71,19 @@ import ReactSharedInternals from './ReactSharedInternals';
 import {startTransition} from './ReactStartTransition';
 import {act} from './ReactAct';
 
+// Patch fetch
+import './ReactFetch';
+
 // TODO: Move this branching into the other module instead and just re-export.
-const createElement = __DEV__ ? createElementWithValidation : createElementProd;
-const cloneElement = __DEV__ ? cloneElementWithValidation : cloneElementProd;
-const createFactory = __DEV__ ? createFactoryWithValidation : createFactoryProd;
+const createElement: any = __DEV__
+  ? createElementWithValidation
+  : createElementProd;
+const cloneElement: any = __DEV__
+  ? cloneElementWithValidation
+  : cloneElementProd;
+const createFactory: any = __DEV__
+  ? createFactoryWithValidation
+  : createFactoryProd;
 
 const Children = {
   map,
@@ -91,9 +104,11 @@ export {
   forwardRef,
   lazy,
   memo,
+  cache as experimental_cache,
   useCallback,
   useContext,
   useEffect,
+  useEvent as experimental_useEvent,
   useImperativeHandle,
   useDebugValue,
   useInsertionEffect,
@@ -127,6 +142,8 @@ export {
   getCacheForType as unstable_getCacheForType,
   useCacheRefresh as unstable_useCacheRefresh,
   REACT_CACHE_TYPE as unstable_Cache,
+  use as experimental_use,
+  useMemoCache as unstable_useMemoCache,
   // enableScopeAPI
   REACT_SCOPE_TYPE as unstable_Scope,
   // enableTransitionTracing

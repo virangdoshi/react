@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -115,6 +115,7 @@ export function stringToPrecomputedChunk(content: string): PrecomputedChunk {
 }
 
 export function closeWithError(destination: Destination, error: mixed): void {
+  // $FlowFixMe[method-unbinding]
   if (typeof destination.error === 'function') {
     // $FlowFixMe: This is an Error object or the destination accepts other types.
     destination.error(error);

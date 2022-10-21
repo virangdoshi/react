@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -8,6 +8,8 @@
  */
 
 'use strict';
+
+import {normalizeCodeLocInfo} from './utils';
 
 describe('Timeline profiler', () => {
   let React;
@@ -1924,7 +1926,7 @@ describe('Timeline profiler', () => {
   });
 
   // Note the in-memory tests vary slightly (e.g. timestamp values, lane numbers) from the above tests.
-  // That's okay; the important thing is the the lane-to-label matches the subsequent events/measures.
+  // That's okay; the important thing is the lane-to-label matches the subsequent events/measures.
   describe('DevTools hook (in memory)', () => {
     let store;
 
@@ -2134,6 +2136,15 @@ describe('Timeline profiler', () => {
       const data = store.profilerStore.profilingData?.timelineData;
       expect(data).toHaveLength(1);
       const timelineData = data[0];
+
+      // normalize the location for component stack source
+      // for snapshot testing
+      timelineData.schedulingEvents.forEach(event => {
+        if (event.componentStack) {
+          event.componentStack = normalizeCodeLocInfo(event.componentStack);
+        }
+      });
+
       expect(timelineData).toMatchInlineSnapshot(`
         Object {
           "batchUIDToMeasuresMap": Map {
@@ -2415,6 +2426,8 @@ describe('Timeline profiler', () => {
             },
             Object {
               "componentName": "App",
+              "componentStack": "
+            in App (at **)",
               "lanes": "0b0000000000000000000000000010000",
               "timestamp": 10,
               "type": "schedule-state-update",

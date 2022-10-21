@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -25,13 +25,13 @@ declare module 'create-react-class' {
   declare var exports: React$CreateClass;
 }
 
-declare var trustedTypes: {|
+declare var trustedTypes: {
   isHTML: (value: any) => boolean,
   isScript: (value: any) => boolean,
   isScriptURL: (value: any) => boolean,
   // TrustedURLs are deprecated and will be removed soon: https://github.com/WICG/trusted-types/pull/204
   isURL?: (value: any) => boolean,
-|};
+};
 
 // ReactFeatureFlags www fork
 declare module 'ReactFeatureFlags' {

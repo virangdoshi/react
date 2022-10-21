@@ -963,33 +963,36 @@ describe('ReactSuspenseWithNoopRenderer', () => {
 
   // @gate enableCache
   it('resolves successfully even if fallback render is pending', async () => {
-    ReactNoop.render(
+    const root = ReactNoop.createRoot();
+    root.render(
       <>
         <Suspense fallback={<Text text="Loading..." />} />
       </>,
     );
     expect(Scheduler).toFlushAndYield([]);
-    expect(ReactNoop.getChildren()).toEqual([]);
+    expect(root).toMatchRenderedOutput(null);
     if (gate(flags => flags.enableSyncDefaultUpdates)) {
       React.startTransition(() => {
-        ReactNoop.render(
+        root.render(
           <>
             <Suspense fallback={<Text text="Loading..." />}>
               <AsyncText text="Async" />
+              <Text text="Sibling" />
             </Suspense>
           </>,
         );
       });
     } else {
-      ReactNoop.render(
+      root.render(
         <>
           <Suspense fallback={<Text text="Loading..." />}>
             <AsyncText text="Async" />
+            <Text text="Sibling" />
           </Suspense>
         </>,
       );
     }
-    expect(ReactNoop.flushNextYield()).toEqual(['Suspend! [Async]']);
+    expect(Scheduler).toFlushAndYieldThrough(['Suspend! [Async]', 'Sibling']);
 
     await resolveText('Async');
     expect(Scheduler).toFlushAndYield([
@@ -998,20 +1001,32 @@ describe('ReactSuspenseWithNoopRenderer', () => {
       'Loading...',
       // Once we've completed the boundary we restarted.
       'Async',
+      'Sibling',
     ]);
-    expect(ReactNoop.getChildren()).toEqual([span('Async')]);
+    expect(root).toMatchRenderedOutput(
+      <>
+        <span prop="Async" />
+        <span prop="Sibling" />
+      </>,
+    );
   });
 
   // @gate enableCache
-  it('errors when an update suspends without a placeholder during a sync update', () => {
-    // This is an error because sync/discrete updates are expected to produce
-    // a complete tree immediately to maintain consistency with external state
-    // — we can't delay the commit.
+  it('in concurrent mode, does not error when an update suspends without a Suspense boundary during a sync update', () => {
+    // NOTE: We may change this to be a warning in the future.
     expect(() => {
       ReactNoop.flushSync(() => {
         ReactNoop.render(<AsyncText text="Async" />);
       });
-    }).toThrow('A component suspended while responding to synchronous input.');
+    }).not.toThrow();
+  });
+
+  // @gate enableCache
+  it('in legacy mode, errors when an update suspends without a Suspense boundary during a sync update', () => {
+    const root = ReactNoop.createLegacyRoot();
+    expect(() => root.render(<AsyncText text="Async" />)).toThrow(
+      'A component suspended while responding to synchronous input.',
+    );
   });
 
   // @gate enableCache
@@ -3859,7 +3874,6 @@ describe('ReactSuspenseWithNoopRenderer', () => {
         'Suspend! [A2]',
         'Loading...',
         'Suspend! [B2]',
-        'Loading...',
       ]);
       expect(root).toMatchRenderedOutput(
         <>

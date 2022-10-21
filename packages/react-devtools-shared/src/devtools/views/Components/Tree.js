@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -36,21 +36,22 @@ import {clearErrorsAndWarnings as clearErrorsAndWarningsAPI} from 'react-devtool
 import styles from './Tree.css';
 import ButtonIcon from '../ButtonIcon';
 import Button from '../Button';
+import {logEvent} from 'react-devtools-shared/src/Logger';
 
 // Never indent more than this number of pixels (even if we have the room).
 const DEFAULT_INDENTATION_SIZE = 12;
 
-export type ItemData = {|
+export type ItemData = {
   numElements: number,
   isNavigatingWithKeyboard: boolean,
   lastScrolledIDRef: {current: number | null, ...},
   onElementMouseEnter: (id: number) => void,
   treeFocused: boolean,
-|};
+};
 
-type Props = {||};
+type Props = {};
 
-export default function Tree(props: Props) {
+export default function Tree(props: Props): React.Node {
   const dispatch = useContext(TreeDispatcherContext);
   const {
     numElements,
@@ -103,6 +104,10 @@ export default function Tree(props: Props) {
     function handleStopInspectingNative(didSelectNode) {
       if (didSelectNode && focusTargetRef.current !== null) {
         focusTargetRef.current.focus();
+        logEvent({
+          event_name: 'select-element',
+          metadata: {source: 'inspector'},
+        });
       }
     }
     bridge.addListener('stopInspectingNative', handleStopInspectingNative);
@@ -404,7 +409,6 @@ export default function Tree(props: Props) {
           tabIndex={0}>
           <AutoSizer>
             {({height, width}) => (
-              // $FlowFixMe https://github.com/facebook/flow/issues/7341
               <FixedSizeList
                 className={styles.List}
                 height={height}
@@ -468,8 +472,8 @@ export default function Tree(props: Props) {
 function updateIndentationSizeVar(
   innerDiv: HTMLDivElement,
   cachedChildWidths: WeakMap<HTMLElement, number>,
-  indentationSizeRef: {|current: number|},
-  prevListWidthRef: {|current: number|},
+  indentationSizeRef: {current: number},
+  prevListWidthRef: {current: number},
 ): void {
   const list = ((innerDiv.parentElement: any): HTMLDivElement);
   const listWidth = list.clientWidth;

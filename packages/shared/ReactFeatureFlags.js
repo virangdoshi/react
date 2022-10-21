@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -24,20 +24,9 @@ export const disableSchedulerTimeoutBasedOnReactExpirationTime = false;
 // like migrating internal callers or performance testing.
 // -----------------------------------------------------------------------------
 
-// This is blocked on adding a symbol polyfill to www.
-export const enableSymbolFallbackForWWW = false;
-
 // This rolled out to 10% public in www, so we should be able to land, but some
 // internal tests need to be updated. The open source behavior is correct.
 export const skipUnmountedBoundaries = true;
-
-// Destroy layout effects for components that are hidden because something
-// suspended in an update and recreate them when they are shown again (after the
-// suspended boundary has resolved). Note that this should be an uncommon use
-// case and can be avoided by using the transition API.
-//
-// TODO: Finish rolling out in www
-export const enableSuspenseLayoutEffectSemantics = true;
 
 // TODO: Finish rolling out in www
 export const enableClientRenderFallbackOnTextMismatch = true;
@@ -95,6 +84,7 @@ export const enableLegacyFBSupport = false;
 
 export const enableCache = __EXPERIMENTAL__;
 export const enableCacheElement = __EXPERIMENTAL__;
+export const enableFetchInstrumentation = __EXPERIMENTAL__;
 
 export const enableTransitionTracing = false;
 
@@ -111,6 +101,10 @@ export const enableSuspenseAvoidThisFallbackFizz = false;
 
 export const enableCPUSuspense = __EXPERIMENTAL__;
 
+export const enableHostSingletons = __EXPERIMENTAL__;
+
+export const enableFloat = __EXPERIMENTAL__;
+
 // When a node is unmounted, recurse into the Fiber subtree and clean out
 // references. Each level cleans up more fiber fields than the previous level.
 // As far as we know, React itself doesn't leak, but because the Fiber contains
@@ -124,11 +118,22 @@ export const enableCPUSuspense = __EXPERIMENTAL__;
 // aggressiveness.
 export const deletedTreeCleanUpLevel = 3;
 
+export const enableUseHook = __EXPERIMENTAL__;
+
+// Enables unstable_useMemoCache hook, intended as a compilation target for
+// auto-memoization.
+export const enableUseMemoCacheHook = __EXPERIMENTAL__;
+
+export const enableUseEventHook = __EXPERIMENTAL__;
+
+// Test in www before enabling in open source.
+export const enableFizzExternalRuntime = false;
+
 // -----------------------------------------------------------------------------
 // Chopping Block
 //
 // Planned feature deprecations and breaking changes. Sorted roughly in order of
-// when we we plan to enable them.
+// when we plan to enable them.
 // -----------------------------------------------------------------------------
 
 // This flag enables Strict Effects by default. We're not turning this on until
@@ -225,10 +230,6 @@ export const enableSchedulingProfiler = __PROFILE__;
 // reducers by double invoking them in StrictLegacyMode.
 export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
 
-// Helps identify code that is not safe for planned Offscreen API and Suspense semantics;
-// this feature flag only impacts StrictEffectsMode.
-export const enableStrictEffects = __DEV__;
-
 // To preserve the "Pause on caught exceptions" behavior of the debugger, we
 // replay the begin phase of a failed component inside invokeGuardedCallback.
 export const replayFailedUnitOfWorkWithInvokeGuardedCallback = __DEV__;
@@ -262,3 +263,8 @@ export const enableGetInspectorDataForInstanceInProduction = false;
 export const enableProfilerNestedUpdateScheduledHook = false;
 
 export const consoleManagedByDevToolsDuringStrictMode = true;
+
+// Modern <StrictMode /> behaviour aligns more with what components
+// components will encounter in production, especially when used With <Offscreen />.
+// TODO: clean up legacy <StrictMode /> once tests pass WWW.
+export const useModernStrictMode = false;

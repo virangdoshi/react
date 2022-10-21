@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -15,7 +15,7 @@ import type {
 } from './ReactInternalTypes';
 import type {StackCursor} from './ReactFiberStack.new';
 import type {Lanes} from './ReactFiberLane.new';
-import type {SharedQueue} from './ReactUpdateQueue.new';
+import type {SharedQueue} from './ReactFiberClassUpdateQueue.new';
 
 import {isPrimaryRenderer} from './ReactFiberHostConfig';
 import {createCursor, push, pop} from './ReactFiberStack.new';
@@ -39,7 +39,7 @@ import {
 } from './ReactFiberFlags';
 
 import is from 'shared/objectIs';
-import {createUpdate, ForceUpdate} from './ReactUpdateQueue.new';
+import {createUpdate, ForceUpdate} from './ReactFiberClassUpdateQueue.new';
 import {markWorkInProgressReceivedUpdate} from './ReactFiberBeginWork.new';
 import {
   enableLazyContextPropagation,
@@ -525,7 +525,7 @@ function propagateParentContextChanges(
   // Collect all the parent providers that changed. Since this is usually small
   // number, we use an Array instead of Set.
   let contexts = null;
-  let parent = workInProgress;
+  let parent: null | Fiber = workInProgress;
   let isInsidePropagationBailout = false;
   while (parent !== null) {
     if (!isInsidePropagationBailout) {
@@ -598,7 +598,9 @@ function propagateParentContextChanges(
   workInProgress.flags |= DidPropagateContext;
 }
 
-export function checkIfContextChanged(currentDependencies: Dependencies) {
+export function checkIfContextChanged(
+  currentDependencies: Dependencies,
+): boolean {
   if (!enableLazyContextPropagation) {
     return false;
   }
