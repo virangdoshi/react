@@ -51,7 +51,6 @@ import {
 import {createPortal as createPortalImpl} from 'react-reconciler/src/ReactPortal';
 import {canUseDOM} from 'shared/ExecutionEnvironment';
 import ReactVersion from 'shared/ReactVersion';
-import {enableNewReconciler} from 'shared/ReactFeatureFlags';
 
 import {
   getClosestInstanceFromNode,
@@ -75,6 +74,8 @@ import {
   restoreStateIfNeeded,
 } from 'react-dom-bindings/src/events/ReactDOMControlledComponent';
 import Internals from '../ReactDOMSharedInternals';
+
+export {preinit, preload} from 'react-dom-bindings/src/shared/ReactDOMFloat';
 
 setAttemptSynchronousHydration(attemptSynchronousHydration);
 setAttemptDiscreteHydration(attemptDiscreteHydration);
@@ -254,5 +255,3 @@ if (__DEV__) {
     }
   }
 }
-
-export const unstable_isNewReconciler = enableNewReconciler;

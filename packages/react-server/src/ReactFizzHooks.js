@@ -21,22 +21,18 @@ import type {
 
 import type {ResponseState} from './ReactServerFormatConfig';
 import type {Task} from './ReactFizzServer';
-import type {ThenableState} from './ReactFizzWakeable';
+import type {ThenableState} from './ReactFizzThenable';
 
 import {readContext as readContextImpl} from './ReactFizzNewContext';
 import {getTreeId} from './ReactFizzTreeContext';
-import {
-  getPreviouslyUsedThenableAtIndex,
-  createThenableState,
-  trackUsedThenable,
-} from './ReactFizzWakeable';
+import {createThenableState, trackUsedThenable} from './ReactFizzThenable';
 
 import {makeId} from './ReactServerFormatConfig';
 
 import {
   enableCache,
   enableUseHook,
-  enableUseEventHook,
+  enableUseEffectEventHook,
   enableUseMemoCacheHook,
 } from 'shared/ReactFeatureFlags';
 import is from 'shared/objectIs';
@@ -511,17 +507,17 @@ export function useCallback<T>(
   return useMemo(() => callback, deps);
 }
 
-function throwOnUseEventCall() {
+function throwOnUseEffectEventCall() {
   throw new Error(
-    "A function wrapped in useEvent can't be called during rendering.",
+    "A function wrapped in useEffectEvent can't be called during rendering.",
   );
 }
 
-export function useEvent<Args, Return, F: (...Array<Args>) => Return>(
+export function useEffectEvent<Args, Return, F: (...Array<Args>) => Return>(
   callback: F,
 ): F {
   // $FlowIgnore[incompatible-return]
-  return throwOnUseEventCall;
+  return throwOnUseEffectEventCall;
 }
 
 // TODO Decide on how to implement this hook for server rendering.
@@ -593,61 +589,10 @@ function use<T>(usable: Usable<T>): T {
       const index = thenableIndexCounter;
       thenableIndexCounter += 1;
 
-      switch (thenable.status) {
-        case 'fulfilled': {
-          const fulfilledValue: T = thenable.value;
-          return fulfilledValue;
-        }
-        case 'rejected': {
-          const rejectedError = thenable.reason;
-          throw rejectedError;
-        }
-        default: {
-          const prevThenableAtIndex: Thenable<T> | null = getPreviouslyUsedThenableAtIndex(
-            thenableState,
-            index,
-          );
-          if (prevThenableAtIndex !== null) {
-            if (thenable !== prevThenableAtIndex) {
-              // Avoid an unhandled rejection errors for the Promises that we'll
-              // intentionally ignore.
-              thenable.then(noop, noop);
-            }
-            switch (prevThenableAtIndex.status) {
-              case 'fulfilled': {
-                const fulfilledValue: T = prevThenableAtIndex.value;
-                return fulfilledValue;
-              }
-              case 'rejected': {
-                const rejectedError: mixed = prevThenableAtIndex.reason;
-                throw rejectedError;
-              }
-              default: {
-                // The thenable still hasn't resolved. Suspend with the same
-                // thenable as last time to avoid redundant listeners.
-                throw prevThenableAtIndex;
-              }
-            }
-          } else {
-            // This is the first time something has been used at this index.
-            // Stash the thenable at the current index so we can reuse it during
-            // the next attempt.
-            if (thenableState === null) {
-              thenableState = createThenableState();
-            }
-            trackUsedThenable(thenableState, thenable, index);
-
-            // Suspend.
-            // TODO: Throwing here is an implementation detail that allows us to
-            // unwind the call stack. But we shouldn't allow it to leak into
-            // userspace. Throw an opaque placeholder value instead of the
-            // actual thenable. If it doesn't get captured by the work loop, log
-            // a warning, because that means something in userspace must have
-            // caught it.
-            throw thenable;
-          }
-        }
+      if (thenableState === null) {
+        thenableState = createThenableState();
       }
+      return trackUsedThenable(thenableState, thenable, index);
     } else if (
       usable.$$typeof === REACT_CONTEXT_TYPE ||
       usable.$$typeof === REACT_SERVER_CONTEXT_TYPE
@@ -706,8 +651,8 @@ export const HooksDispatcher: Dispatcher = {
 if (enableCache) {
   HooksDispatcher.useCacheRefresh = useCacheRefresh;
 }
-if (enableUseEventHook) {
-  HooksDispatcher.useEvent = useEvent;
+if (enableUseEffectEventHook) {
+  HooksDispatcher.useEffectEvent = useEffectEvent;
 }
 if (enableUseMemoCacheHook) {
   HooksDispatcher.useMemoCache = useMemoCache;
